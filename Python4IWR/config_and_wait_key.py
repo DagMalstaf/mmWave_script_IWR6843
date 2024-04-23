@@ -1,9 +1,9 @@
 import serial, time
 
-# Configure IWR1642 by serial port
+# Configure IWR6843 by serial port
 serial_port_CLI = 'COM6'
-file_cfg = 'cfg/profile.cfg'
-print('Sending ' + file_cfg + ' to IWR1642 on ' + serial_port_CLI)
+file_cfg = 'cfg/custom_profile.cfg'
+print('Sending ' + file_cfg + ' to IWR6843 on ' + serial_port_CLI)
 CLIport = serial.Serial(serial_port_CLI, 115200, timeout=1)
 if CLIport.is_open:
     config = [line.rstrip('\r\n') for line in open(file_cfg)]
