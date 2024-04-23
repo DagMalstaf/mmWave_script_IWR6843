@@ -36,7 +36,7 @@ ar1.DataPathConfig(513, 1216644097, 0)
 ar1.LvdsClkConfig(1, 1)
 ar1.LVDSLaneConfig(0, 1, 1, 0, 0, 1, 0, 0)
 
-ar1.ProfileConfig(0, 60, 100, 6, 60, 0, 0, 0, 0, 0, 0, 29,982, 0, 256, 10000, 0, 131072, 30)
+ar1.ProfileConfig(0, 60, 100, 6, 60, 0, 0, 0, 0, 0, 0, 29.982, 0, 256, 10000, 0, 131072, 30)
 ar1.ChirpConfig(0, 0, 0, 0, 0, 0, 0, 1, 0, 0)
 ar1.DisableTestSource(0)
 ar1.FrameConfig(0, 0, 8, 128, 40, 0, 0, 1)
@@ -48,6 +48,8 @@ ar1.CaptureCardConfig_Mode(1, 2, 1, 2, 3, 30)
 ar1.CaptureCardConfig_PacketDelay(25)
 ar1.GetCaptureCardFPGAVersion()
 
-ar1.CaptureCardConfig_StartRecord("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\adc_data.bin", 1)
+ar1.CaptureCardConfig_StartRecord("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\adc_data_auto.bin", 1)
 ar1.StartFrame()
 ar1.StopFrame()
+
+ar1.StartMatlabPostProc("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\adc_data_auto.bin")
