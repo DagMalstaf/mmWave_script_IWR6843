@@ -1,12 +1,12 @@
 /**
- *   @file  mmwdemo_error.h
+ *   @file  mmwdemo_flash.h
  *
  *   @brief
- *      Error codes of modules from demo/utils that are used by mmwdemo
+ *      This is used to abstract the mmWave demo QSPI flash API definitions.
  *
  *  \par
  *  NOTE:
- *      (C) Copyright 2018 Texas Instruments, Inc.
+ *      (C) Copyright 2020 Texas Instruments, Inc.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions
@@ -36,23 +36,49 @@
  *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  *  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef MMWDEMO_ERROR_H
-#define MMWDEMO_ERROR_H
+
+#ifndef MMWAVEDEMO_FLASH_H
+#define MMWAVEDEMO_FLASH_H
+
+#include <ti/demo/utils/mmwdemo_error.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <ti/common/mmwave_error.h>
 
-#define MMWAVE_ERRNO_MMWDEMO_RFPARSER_BASE   MMWAVE_ERRNO_DEMO_BASE
+/***********************************************************************************************
+ * mmwDemo Flash module error
+ ***********************************************************************************************/
 
-#define MMWAVE_ERRNO_MMWDEMO_FLASH_BASE   	     (MMWAVE_ERRNO_DEMO_BASE-100)
+/**
+ * @brief   Error Code: Invalid variable
+ */
+#define MMWDEMO_FLASH_EINVAL     								             (MMWAVE_ERRNO_MMWDEMO_FLASH_BASE-1)
+
+/**
+ * @brief   Error Code: receive error when accessing QSPI interface
+ */
+#define MMWDEMO_FLASH_EINVAL__QSPI        								(MMWAVE_ERRNO_MMWDEMO_FLASH_BASE-2)
+
+/**
+ * @brief   Error Code: receive error when accessing QSPI Flash
+ */
+#define MMWDEMO_FLASH_EINVAL__QSPIFLASH       						(MMWAVE_ERRNO_MMWDEMO_FLASH_BASE-3)
+
+/***********************************************************************************************
+ * Flash API: to access QSPI Flash from mmw Demo
+ ***********************************************************************************************/
+extern int32_t mmwDemo_flashInit(void);
+extern int32_t mmwDemo_flashRead(uint32_t flashAddr, uint32_t *readBuf, uint32_t size);
+extern int32_t mmwDemo_flashWrite(uint32_t flashAddr, uint32_t *writeBuf, uint32_t size);
+extern int32_t mmwDemo_flashEraseOneSector(uint32_t flashAddr);
+extern int32_t mmwDemo_flashSetReadMode(void);
 
 #ifdef __cplusplus
 }
 #endif
 
+#endif /* MMWAVEDEMO_FLASH_H */
 
-#endif /* MMWDEMO_ERROR_H */
 

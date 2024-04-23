@@ -50,6 +50,8 @@
 #include <math.h>
 
 #ifdef MMWDEMO_RFPARSER_DBG
+/* enable float extended format in BIOS cfg file using System.extendedFormats
+   to able to print %f values */
 #include <xdc/runtime/System.h>
 #endif
 
@@ -205,6 +207,32 @@ MmwDemo_RFParserHwAttr MmwDemo_RFParserHwCfg =
 /**
  *  @b Description
  *  @n
+ *      Help Function to get frame period
+ *
+ *  @param[in] ctrlCfg       Handle to MMWave control configuration
+ *  @param[in] subFrameIndx  Sub frame index
+ *
+ *  \ingroup MMWDEMO_RFPARSER_INTERNAL_FUNCTION
+ *
+ *  @retval
+ *      Frame period
+ */
+static float MmwDemo_RFParser_getFramePeriod_ms(MMWave_CtrlCfg *ctrlCfg, uint8_t subFrameIndx)
+{
+    if (ctrlCfg->dfeDataOutputMode == MMWave_DFEDataOutputMode_ADVANCED_FRAME)
+    {
+        return(ctrlCfg->u.advancedFrameCfg.frameCfg.frameSeq.subFrameCfg[subFrameIndx].subFramePeriodicity * 0.000005f);
+    }
+    else
+    {
+        return((float)ctrlCfg->u.frameCfg.frameCfg.framePeriodicity * 0.000005f);
+    }
+}
+
+
+/**
+ *  @b Description
+ *  @n
  *      Help Function to get chirp start Index
  *
  *  @param[in] ctrlCfg       Handle to MMWave control configuration
@@ -303,6 +331,347 @@ static MMWave_ProfileHandle MmwDemo_RFParser_getProfileHandle(MMWave_CtrlCfg *ct
     }
 }
 
+#ifdef USE_2D_AOA_DPU
+/**
+ *  @b Description
+ *  @n
+ *      Helper function that parses chirp Tx antenna configuration and extracts parameters
+ *      needed for AoA configuration depending on the AoA DPU needs
+ *
+ *  @param[inout]   outParams               Pointer to parameters generated after parsing configuration
+ *  @param[inout]   pFoundValidProfile      flag to indicate if this is valid profile; if not, advance to the next one
+ *  @param[in]      frameTotalChirps        Total chirps in the frame (used for looping through validChirpTxEnBits)
+ *  @param[in]      validChirpTxEnBits      Array of chirp's txEn bits. Dimension is provided by frameTotalChirps
+ *  @param[in]      bpmEnabled              BPM flag, 0 -disabled, 1-enabled
+ *
+ *  \ingroup MMWDEMO_RFPARSER_INTERNAL_FUNCTION
+ *
+ *  @retval
+ *      Success -   0
+ *      Fail        <0, one of error codes @ref MMWDEMO_RFPARSER_ERROR_CODE
+ */
+static int32_t MmwDemo_RFParser_setAoAParams
+(
+    MmwDemo_RFParserOutParams  *outParams,
+    bool                       *pFoundValidProfile,
+    int16_t                     frameTotalChirps,
+    uint16_t                   *validChirpTxEnBits,
+    bool                        bpmEnabled
+)
+{
+    uint32_t    chirpLoopIdx;
+    bool        validProfileHasOneTxPerChirp = false;
+    uint16_t    validProfileTxEn = 0;
+    int32_t     retVal = 0;
+    int32_t     i;
+
+    
+    /* for this antenna pattern we require that all Rx's are enabled */
+    if (outParams->numRxAntennas != SYS_COMMON_NUM_RX_CHANNEL)
+    {
+        retVal = MMWDEMO_RFPARSER_EINVAL__NUM_RX_ANTENNAS;
+        goto exit;
+    }
+    
+    /* now loop through unique chirps and check if we found all of the ones
+       needed for the frame and then determine the azimuth/elevation antenna
+       configuration
+     */
+    if (*pFoundValidProfile==true) {
+        for (chirpLoopIdx = 0; chirpLoopIdx < frameTotalChirps; chirpLoopIdx++)
+        {
+            bool        validChirpHasOneTxPerChirp = false;
+            uint8_t     log2TxEn;
+            uint16_t    chirpTxEn = validChirpTxEnBits[chirpLoopIdx];
+            if (chirpTxEn == 0) {
+                /* this profile doesn't have all the needed chirps */
+                *pFoundValidProfile = false;
+                break;
+            }
+
+            /* If only TX antenna is enabled, then its 0x1<< log2TxEn should equal chirpTxEn */
+            log2TxEn = mathUtils_floorLog2(chirpTxEn);
+            validChirpHasOneTxPerChirp = (chirpTxEn == (1 << log2TxEn));
+
+            /* for this antenna pattern we require that only one Tx per chirp is enabled*/
+            if (validChirpHasOneTxPerChirp != true)
+            {
+                /* this profile doesn't have chirps with one TxAnt enabled per Chirp */
+                *pFoundValidProfile = false;
+                break;
+            }
+
+            /* if this is the first chirp, record the chirp's
+            MIMO config as profile's MIMO config. We dont handle intermix
+            at this point */
+            if (chirpLoopIdx == 0)
+            {
+                validProfileHasOneTxPerChirp = validChirpHasOneTxPerChirp;
+            }
+            /* check the chirp's MIMO config against Profile's MIMO config */
+            if (validChirpHasOneTxPerChirp != validProfileHasOneTxPerChirp)
+            {
+                /* this profile doesnt have all chirps with same MIMO config */
+                *pFoundValidProfile = false;
+                break;
+            }
+
+            /* save the antennas actually enabled in this profile */
+            validProfileTxEn |= chirpTxEn;
+        }
+    }
+
+    /* found valid chirps for the frame; mark this profile valid */
+    if (*pFoundValidProfile == true) {
+        uint16_t        tempValidProfileTxEn=0;
+        
+        /* set Tx Antenna and Virtual antenna related config */
+        outParams->numTxAntennas = 0;
+        tempValidProfileTxEn = validProfileTxEn;
+        while (tempValidProfileTxEn!=0) {
+            if ((tempValidProfileTxEn&0x1)==0x1)
+            {
+                outParams->numTxAntennas++;
+            }
+            tempValidProfileTxEn=tempValidProfileTxEn>>1;
+        }
+        if (outParams->numTxAntennas > SYS_COMMON_NUM_TX_ANTENNAS)
+        {
+            retVal = MMWDEMO_RFPARSER_EINVAL_NUM_TX_ANTENNAS;
+            goto exit;
+        }
+        outParams->numVirtualAntAzim = 0; // unused
+        outParams->numVirtualAntElev = 0; // unused
+        outParams->numVirtualAntennas = outParams->numTxAntennas * outParams->numRxAntennas;
+        /* Sanity Check: Ensure that the number of antennas is within system limits */
+        if ((outParams->numVirtualAntennas <= 0) ||
+           (outParams->numVirtualAntennas > (SYS_COMMON_NUM_TX_ANTENNAS * SYS_COMMON_NUM_RX_CHANNEL)))
+        {
+            retVal = MMWDEMO_RFPARSER_EINVAL__NUM_VIRTUAL_ANTENNAS;
+        }
+
+        /* txAntOrder[] will be needed for Rx Channel Phase Measurement/Compensation routines */
+        for (i = 0; i < outParams->numTxAntennas; i++)
+        {
+            outParams->txAntOrder[i] = mathUtils_floorLog2(validChirpTxEnBits[i]);
+        }
+
+        outParams->validProfileHasOneTxPerChirp = validProfileHasOneTxPerChirp;
+    }
+    
+exit:
+    return (retVal);    
+}
+
+
+#else
+/**
+ *  @b Description
+ *  @n
+ *      Helper function that parses chirp Tx antenna configuration and extracts parameters
+ *      needed for AoA configuration depending on the AoA DPU needs
+ *
+ *  @param[inout]   outParams               Pointer to parameters generated after parsing configuration
+ *  @param[inout]   pFoundValidProfile      flag to indicate if this is valid profile; if not, advance to the next one
+ *  @param[in]      frameTotalChirps        Total chirps in the frame (used for looping through validChirpTxEnBits)
+ *  @param[in]      validChirpTxEnBits      Array of chirp's txEn bits. Dimension is provided by frameTotalChirps
+ *  @param[in]      bpmEnabled              BPM flag, 0 -disabled, 1-enabled
+ *
+ *  \ingroup MMWDEMO_RFPARSER_INTERNAL_FUNCTION
+ *
+ *  @retval
+ *      Success -   0
+ *      Fail        <0, one of error codes @ref MMWDEMO_RFPARSER_ERROR_CODE
+ */
+static int32_t MmwDemo_RFParser_setAoAParams
+(
+    MmwDemo_RFParserOutParams  *outParams,
+    bool                       *pFoundValidProfile,
+    int16_t                     frameTotalChirps,
+    uint16_t                   *validChirpTxEnBits,
+    bool                        bpmEnabled
+)
+{
+    
+    uint32_t    chirpLoopIdx;
+    bool        validProfileHasOneTxPerChirp = false;
+    uint16_t    validProfileTxEn = 0;
+    int32_t     retVal = 0;
+    bool        validProfileHasElevation = false;
+    int32_t     i;
+        
+
+    /* now loop through unique chirps and check if we found all of the ones
+       needed for the frame and then determine the azimuth/elevation antenna
+       configuration
+     */
+    if (*pFoundValidProfile==true) {
+        int16_t nonElevFirstChirpIdx = -1;
+        for (chirpLoopIdx = 0; chirpLoopIdx < frameTotalChirps; chirpLoopIdx++)
+        {
+            bool validChirpHasElevation = false;
+            bool validChirpHasOneTxPerChirp = false;
+            uint16_t chirpTxEn = validChirpTxEnBits[chirpLoopIdx];
+            if (chirpTxEn == 0) {
+                /* this profile doesn't have all the needed chirps */
+                *pFoundValidProfile = false;
+                break;
+            }
+
+            /* check if this is an elevation TX chirp - if yes, it is assumed to be 4Rx, 3Tx case */
+            validChirpHasElevation = (chirpTxEn == MmwDemo_RFParserHwCfg.elevTxAntMask);
+            validProfileHasElevation |= validChirpHasElevation;
+
+            /* if not, then check the MIMO config */
+            if (!validChirpHasElevation)
+            {
+                uint8_t     log2TxEn;
+
+                if(bpmEnabled)
+                {   /* In case of BPM, check if both TX antennas are enabled*/
+                    if(chirpTxEn != MmwDemo_RFParserHwCfg.azimTxAntMask)
+                    {
+                        /* The frame is configured as BPM but this chirp does not enable both TX antennas*/
+                        *pFoundValidProfile = false;
+#ifdef MMWDEMO_RFPARSER_DBG
+                        System_printf("Bad BPM configuration. chirpTxEn=%d for chirp %d \n",chirpTxEn,chirpLoopIdx);
+#endif
+                        break;
+                    }
+                }
+                else
+                {
+                    /* If only TX antenna is enabled, then its 0x1<< log2TxEn should equal chirpTxEn */
+                    log2TxEn = mathUtils_floorLog2(chirpTxEn);
+                    validChirpHasOneTxPerChirp = (chirpTxEn == (1 << log2TxEn));
+                }
+
+                /* if this is the first chirp without elevation, record the chirp's
+                   MIMO config as profile's MIMO config. We dont handle intermix
+                   at this point */
+                if (nonElevFirstChirpIdx == -1) {
+                    validProfileHasOneTxPerChirp = validChirpHasOneTxPerChirp;
+                    nonElevFirstChirpIdx = chirpLoopIdx;
+                }
+
+                /* if this is the first chirp, record the chirp's
+                   MIMO config as profile's MIMO config. We dont handle intermix
+                   at this point */
+                if (chirpLoopIdx == 0)
+                {
+                    validProfileHasOneTxPerChirp = validChirpHasOneTxPerChirp;
+                }
+                /* check the chirp's MIMO config against Profile's MIMO config */
+                if (validChirpHasOneTxPerChirp != validProfileHasOneTxPerChirp)
+                {
+                    /* this profile doesnt have all chirps with same MIMO config */
+                    *pFoundValidProfile = false;
+                    break;
+                }
+            }
+
+            /* save the antennas actually enabled in this profile */
+            validProfileTxEn |= chirpTxEn;
+        }
+    }
+
+    /* found valid chirps for the frame; mark this profile valid */
+    if (*pFoundValidProfile == true) {
+        uint32_t        numTxAntAzim = 0;
+        uint32_t        numTxAntElev = 0;
+
+        outParams->numTxAntennas = 0;
+        if (validProfileHasElevation)
+        {
+            numTxAntElev = 1;
+        }
+
+        if (bpmEnabled == true)
+        {
+            /* BPM eanbled */
+            numTxAntAzim = 2;
+        }
+        else if (validProfileHasOneTxPerChirp == true)
+        {
+            uint8_t log2TxEn;
+
+            while(validProfileTxEn)
+            {
+                log2TxEn = mathUtils_floorLog2(validProfileTxEn);
+                if ((0x1 << log2TxEn) & MmwDemo_RFParserHwCfg.azimTxAntMask)
+                {
+                    numTxAntAzim++;
+                }
+                validProfileTxEn &= ~(0x1<< log2TxEn);
+            }
+        }
+        else /* i.e. SIMO case, all chirps have same one Tx antenna. */
+        {
+            /* in this case, for AOA, Tx Azimuth antenna is only 1. */
+            if ((validProfileTxEn & MmwDemo_RFParserHwCfg.azimTxAntMask) != 0)
+            {
+                numTxAntAzim = 1;
+            }
+            else
+            {
+                numTxAntAzim = 0;
+            }
+        }
+
+#ifdef MMWDEMO_RFPARSER_DBG
+        System_printf("Azimuth Tx: %d (MIMO:%d), Elev Tx:%d\n",
+                       numTxAntAzim,validProfileHasOneTxPerChirp,numTxAntElev);
+#endif
+
+        outParams->numTxAntennas = numTxAntAzim + numTxAntElev;
+        if (outParams->numTxAntennas > SYS_COMMON_NUM_TX_ANTENNAS)
+        {
+            retVal = MMWDEMO_RFPARSER_EINVAL_NUM_TX_ANTENNAS;
+            goto exit;
+        }
+
+        outParams->numVirtualAntAzim = numTxAntAzim * outParams->numRxAntennas;
+        outParams->numVirtualAntElev = numTxAntElev * outParams->numRxAntennas;
+        outParams->numVirtualAntennas = outParams->numVirtualAntAzim +
+                                              outParams->numVirtualAntElev;
+
+        /* Sanity Check: Ensure that the number of antennas is within system limits */
+        if ((outParams->numVirtualAntennas <= 0) ||
+           (outParams->numVirtualAntennas > (SYS_COMMON_NUM_TX_ANTENNAS * SYS_COMMON_NUM_RX_CHANNEL)))
+        {
+            retVal = MMWDEMO_RFPARSER_EINVAL__NUM_VIRTUAL_ANTENNAS;
+        }
+
+        /* txAntOrder[] will be needed for Rx Channel Phase Measurement/Compensation routines */
+        if (validProfileHasOneTxPerChirp)
+        {
+            for (i = 0; i < outParams->numTxAntennas; i++)
+            {
+                outParams->txAntOrder[i] = mathUtils_floorLog2(validChirpTxEnBits[i]);
+            }
+        }
+        else
+        {
+            for (i = 0; i < outParams->numTxAntennas; i++)
+            {
+                outParams->txAntOrder[i] = i;
+            }
+        }
+
+        outParams->validProfileHasOneTxPerChirp = validProfileHasOneTxPerChirp;
+        
+#ifdef MMWDEMO_RFPARSER_DBG
+        System_printf("Ant setting virtualAzim: %d , virtual Elev :%d\n",
+                        outParams->numVirtualAntAzim, outParams->numVirtualAntElev);
+#endif
+    }
+    
+exit:
+    return (retVal);        
+}
+
+#endif
+
 /**
  *  @b Description
  *  @n
@@ -315,7 +684,7 @@ static MMWave_ProfileHandle MmwDemo_RFParser_getProfileHandle(MMWave_CtrlCfg *ct
  *  @param[in]  ctrlCfg              Pointer to the MMWave Control configuration
  *  @param[in]  rfFreqScaleFactor RF frequency scale factor, see SOC_getDeviceRFFreqScaleFactor API
  *                                in SOC driver
- *  @param[in]  bpmEnabled     Flag indicates if BPM is enabled
+ *  @param[in]  bpmEnabled     BPM flag, 0 -disabled, 1-enabled
  *
  *  \ingroup MMWDEMO_RFPARSER_INTERNAL_FUNCTION
  *
@@ -341,13 +710,13 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
     uint16_t    channelTxEn = openCfg->chCfg.txChannelEn;
     uint8_t     channel;
     uint8_t     numRxAntennas;
-    int32_t     i;
     uint16_t    numLoops;
     int32_t     retVal = 0;
     int32_t     errCode;
+    float       bandwidth, centerFreq, adcStart, slope, startFreq;
 
     /***********************************************
-     * Sanity Check on ADC configuration 
+     * Sanity Check on ADC configuration
      ***********************************************/
     /* Only support 16 Bits ADC out bits */
     if(openCfg->adcOutCfg.fmt.b2AdcBits != 2U)
@@ -382,10 +751,12 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
             outParams->rxAntOrder[channel] = 0U;
         }
 
-        //add check to make sure lambda/2 
+        //add check to make sure lambda/2
         //check for rxAnt -= 1, 2, 4 and their limitations
     }
     outParams->numRxAntennas = numRxAntennas;
+
+
 
     /***********************************************
      * Parse frameCfg
@@ -393,7 +764,8 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
     /* Read frameCfg chirp start/stop index */
     frameChirpStartIdx  = MmwDemo_RFParser_getChirpStartIdx(ctrlCfg, subFrameIdx);
     frameChirpEndIdx    = MmwDemo_RFParser_getChirpEndIdx(ctrlCfg, subFrameIdx);
-    numLoops            = MmwDemo_RFParser_getNumLoops(ctrlCfg, subFrameIdx);
+    numLoops            = MmwDemo_RFParser_getNumLoops(ctrlCfg, subFrameIdx);    
+    outParams->framePeriod  =  MmwDemo_RFParser_getFramePeriod_ms(ctrlCfg, subFrameIdx);
     frameTotalChirps    = frameChirpEndIdx - frameChirpStartIdx + 1;
 
     /* TODO::Advance Frame only support one burst - chain limitation,  */
@@ -419,9 +791,6 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
         profileLoopIdx++)
     {
         uint32_t    mmWaveNumChirps = 0;
-        bool        validProfileHasElevation = false;
-        bool        validProfileHasOneTxPerChirp = false;
-        uint16_t    validProfileTxEn = 0;
         uint16_t    validChirpTxEnBits[32]={0};
         MMWave_ProfileHandle profileHandle;
 
@@ -477,169 +846,23 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
                 }
             }
         }
-        /* now loop through unique chirps and check if we found all of the ones
-           needed for the frame and then determine the azimuth/elevation antenna
-           configuration
-         */
-        if (foundValidProfile) {
-            int16_t nonElevFirstChirpIdx = -1;
-            for (chirpLoopIdx = 0; chirpLoopIdx < frameTotalChirps; chirpLoopIdx++)
-            {
-                bool validChirpHasElevation = false;
-                bool validChirpHasOneTxPerChirp = false;
-                uint16_t chirpTxEn = validChirpTxEnBits[chirpLoopIdx];
-                if (chirpTxEn == 0) {
-                    /* this profile doesn't have all the needed chirps */
-                    foundValidProfile = false;
-                    break;
-                }
 
-                /* check if this is an elevation TX chirp */
-                validChirpHasElevation = (chirpTxEn == MmwDemo_RFParserHwCfg.elevTxAntMask);
-                validProfileHasElevation |= validChirpHasElevation;
-
-                /* if not, then check the MIMO config */
-                if (!validChirpHasElevation)
-                {
-                    uint8_t     log2TxEn;
-                    
-                    if(bpmEnabled)
-                    {   /* In case of BPM, check if both TX antennas are enabled*/
-                        if(chirpTxEn != MmwDemo_RFParserHwCfg.azimTxAntMask)
-                        {
-                            /* The frame is configured as BPM but this chirp does not enable both TX antennas*/
-                            foundValidProfile = false;
-#ifdef MMWDEMO_RFPARSER_DBG
-                            System_printf("Bad BPM configuration. chirpTxEn=%d for chirp %d \n",chirpTxEn,chirpLoopIdx);
-#endif
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        /* If only TX antenna is enabled, then its 0x1<< log2TxEn should equal chirpTxEn */
-                        log2TxEn = mathUtils_floorLog2(chirpTxEn);
-                        validChirpHasOneTxPerChirp = (chirpTxEn == (1 << log2TxEn));
-                    }
-
-                    /* if this is the first chirp without elevation, record the chirp's
-                       MIMO config as profile's MIMO config. We dont handle intermix
-                       at this point */
-                    if (nonElevFirstChirpIdx == -1) {
-                        validProfileHasOneTxPerChirp = validChirpHasOneTxPerChirp;
-                        nonElevFirstChirpIdx = chirpLoopIdx;
-                    }
-
-                    /* if this is the first chirp, record the chirp's
-                       MIMO config as profile's MIMO config. We dont handle intermix
-                       at this point */
-                    if (chirpLoopIdx == 0)
-                    {
-                        validProfileHasOneTxPerChirp = validChirpHasOneTxPerChirp;
-                    }
-                    /* check the chirp's MIMO config against Profile's MIMO config */
-                    if (validChirpHasOneTxPerChirp != validProfileHasOneTxPerChirp)
-                    {
-                        /* this profile doesnt have all chirps with same MIMO config */
-                        foundValidProfile = false;
-                        break;
-                    }
-                }
-
-                /* save the antennas actually enabled in this profile */
-                validProfileTxEn |= chirpTxEn;
-            }
+        /* now parse through all valid chirps, check if the profile is valid and then set the AoA related parameters */
+        retVal = MmwDemo_RFParser_setAoAParams(outParams,
+                                               &foundValidProfile,
+                                               frameTotalChirps,
+                                               validChirpTxEnBits,
+                                               bpmEnabled);
+        if (retVal != 0)
+        {
+            goto exit;
         }
 
-        /* found valid chirps for the frame; mark this profile valid */
+        /* found valid chirps for the frame; set remaining parameters */
         if (foundValidProfile == true) {
             rlProfileCfg_t  profileCfg;
-            uint32_t        numTxAntAzim = 0;
-            uint32_t        numTxAntElev = 0;
-            rlProfileCfg_t  ptrProfileCfg;
-
+            
             outParams->validProfileIdx = profileLoopIdx;
-            /* Get profile id from profile config */
-            retVal = MMWave_getProfileCfg(profileHandle, &ptrProfileCfg, &errCode);
-            if (retVal != 0)
-            {
-                retVal = errCode;
-                goto exit;
-            }
-
-            outParams->numTxAntennas = 0;
-            if (validProfileHasElevation)
-            {
-                numTxAntElev = 1;
-            }
-
-            if (bpmEnabled == true)
-            {
-                /* BPM eanbled */
-                numTxAntAzim = 2;
-            }
-            else if (validProfileHasOneTxPerChirp == true)
-            {
-                uint8_t log2TxEn;
-
-                while(validProfileTxEn)
-                {
-                    log2TxEn = mathUtils_floorLog2(validProfileTxEn);
-                    if ((0x1 << log2TxEn) & MmwDemo_RFParserHwCfg.azimTxAntMask)
-                    {
-                        numTxAntAzim++;
-                    }
-                    validProfileTxEn &= ~(0x1<< log2TxEn);
-                }
-            }
-            else /* i.e. SIMO case, all chirps have same one Tx antenna. */
-            {
-                /* in this case, for AOA, Tx Azimuth antenna is only 1. */
-                numTxAntAzim = 1;
-            }
-
-#ifdef MMWDEMO_RFPARSER_DBG
-            System_printf("Azimuth Tx: %d (MIMO:%d), Elev Tx:%d\n",
-                           numTxAntAzim,validProfileHasOneTxPerChirp,numTxAntElev);
-#endif
-
-            outParams->numTxAntennas = numTxAntAzim + numTxAntElev;
-            if (outParams->numTxAntennas > SYS_COMMON_NUM_TX_ANTENNAS)
-            {
-                retVal = MMWDEMO_RFPARSER_EINVAL_NUM_TX_ANTENNAS;
-                goto exit;
-            }
-
-            outParams->numVirtualAntAzim = numTxAntAzim * outParams->numRxAntennas;
-            outParams->numVirtualAntElev = numTxAntElev * outParams->numRxAntennas;
-            outParams->numVirtualAntennas = outParams->numVirtualAntAzim +
-                                                  outParams->numVirtualAntElev;
-
-            /* Sanity Check: Ensure that the number of antennas is within system limits */
-            if ((outParams->numVirtualAntennas <= 0) ||
-               (outParams->numVirtualAntennas > (SYS_COMMON_NUM_TX_ANTENNAS * SYS_COMMON_NUM_RX_CHANNEL)))
-            {
-                retVal = MMWDEMO_RFPARSER_EINVAL__NUM_VIRTUAL_ANTENNAS;
-            }
-
-            /* txAntOrder[] will be needed for Rx Channel Phase Measurement/Compensation routines */
-            if (validProfileHasOneTxPerChirp)
-            {
-                for (i = 0; i < outParams->numTxAntennas; i++)
-                {
-                    outParams->txAntOrder[i] = mathUtils_floorLog2(validChirpTxEnBits[i]);
-                }
-            }
-            else
-            {
-                for (i = 0; i < outParams->numTxAntennas; i++)
-                {
-                    outParams->txAntOrder[i] = i;
-                }
-            }
-
-            outParams->validProfileHasOneTxPerChirp = validProfileHasOneTxPerChirp;
-
             /* Get the profile configuration: */
             retVal = MMWave_getProfileCfg(profileHandle,&profileCfg, &errCode);
             if (retVal != 0)
@@ -647,7 +870,7 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
                 retVal = errCode;
                 goto exit;
             }
-
+            
 #ifndef MMW_ENABLE_NEGATIVE_FREQ_SLOPE
             /* Check frequency slope */
             if (profileCfg.freqSlopeConst < 0)
@@ -656,28 +879,57 @@ static int32_t MmwDemo_RFParser_parseCtrlConfig
                 goto exit;
             }
 #endif
-
+            /* set other parameters */
             outParams->numAdcSamples = profileCfg.numAdcSamples;
             outParams->numRangeBins = mathUtils_pow2roundup(outParams->numAdcSamples);
             outParams->numChirpsPerFrame = frameTotalChirps * numLoops;
 
             outParams->numDopplerChirps = outParams->numChirpsPerFrame/outParams->numTxAntennas;
             outParams->numDopplerBins = mathUtils_pow2roundup(outParams->numDopplerChirps);
-            outParams->rangeStep = MMWDEMO_RFPARSER_SPEED_OF_LIGHT_IN_METERS_PER_SEC * profileCfg.digOutSampleRate * 1e3 /
-                    (2 * profileCfg.freqSlopeConst * ((rfFreqScaleFactor*1e3*900)/(1U << 26)) * 1e12 * outParams->numRangeBins);
+            
+            adcStart                        =   ((float)profileCfg.adcStartTimeConst * 10.f * 1.e-9);
+            startFreq                       =   (float)profileCfg.startFreqConst/(float)(1U << 26)*rfFreqScaleFactor*(float)1e9;
+            slope                           =   (float)profileCfg.freqSlopeConst * ((rfFreqScaleFactor*1e3*900.f)/(float)(1U << 26)) * 1e12;
+            bandwidth                       =   (slope * outParams->numAdcSamples)/(profileCfg.digOutSampleRate * 1e3);            
+            centerFreq                      =   startFreq + bandwidth * 0.5f + adcStart * slope;            
+            outParams->chirpInterval        =   (float)(profileCfg.idleTimeConst + profileCfg.rampEndTime)/1000.*10*1.e-6;
 
-            outParams->dopplerStep = MMWDEMO_RFPARSER_SPEED_OF_LIGHT_IN_METERS_PER_SEC /
-                                 (2. * profileCfg.startFreqConst/(1U << 26)*rfFreqScaleFactor*1e9 *
-                                 (profileCfg.idleTimeConst+ profileCfg.rampEndTime)/1000.*10*1.e-6 *
-                                 outParams->numDopplerBins *
-                                 outParams->numTxAntennas);
-#ifdef MMWDEMO_RFPARSER_DBG
+            outParams->rangeStep            =   (MMWDEMO_RFPARSER_SPEED_OF_LIGHT_IN_METERS_PER_SEC * profileCfg.digOutSampleRate * 1e3) /
+                                                (2.f * slope * outParams->numRangeBins);
+            outParams->rangeResolution      =   (MMWDEMO_RFPARSER_SPEED_OF_LIGHT_IN_METERS_PER_SEC * profileCfg.digOutSampleRate * 1e3) /
+                                                (2.f * slope * outParams->numAdcSamples);
+            
+            outParams->dopplerStep          =   MMWDEMO_RFPARSER_SPEED_OF_LIGHT_IN_METERS_PER_SEC /
+                                                (2.f * outParams->numDopplerBins * outParams->numTxAntennas * 
+                                                centerFreq * outParams->chirpInterval);            
+            outParams->dopplerResolution    =   MMWDEMO_RFPARSER_SPEED_OF_LIGHT_IN_METERS_PER_SEC /
+                                                (2.f * outParams->numChirpsPerFrame * centerFreq * outParams->chirpInterval);            
+            outParams->centerFreq           =   centerFreq;
+            
+#ifdef MMWDEMO_RFPARSER_DBG        
             System_printf("Ant setting virtualAzim: %d , virtual Elev :%d\n",
                             outParams->numVirtualAntAzim, outParams->numVirtualAntElev);
+            System_printf("startFreqConst: %d\n", profileCfg.startFreqConst);
+            System_printf("rfFreqScaleFactor: %f\n", rfFreqScaleFactor);
+            System_printf("bandwidth : %f GHz\n", bandwidth*1.e-9);
+            System_printf("adcStartTimeConst: %d\n", profileCfg.adcStartTimeConst);
+            System_printf("freqSlopeConst: %d\n", profileCfg.freqSlopeConst);
+            System_printf("centerFreq: %f GHz\n", centerFreq*1.e-9);
+            System_printf("dopplerStep: %f\n", outParams->dopplerStep);
+            System_printf("adcStart: %f us\n", adcStart * 1e6);
+            System_printf("slope: %f GHz\n", slope*1.e-9);
+            System_printf("startFreq: %f GHz\n", startFreq*1.e-9);
 #endif
             
         }
     }
+
+    if (foundValidProfile == false)
+    {
+        retVal = MMWDEMO_RFPARSER_EINVAL__VALID_PROFILECFG_NOT_FOUND;
+        goto exit;
+    }
+
 exit:
     return (retVal);
 }
@@ -808,7 +1060,7 @@ exit:
  *  @param[in]  ctrlCfg        Pointer to the MMWave Control configuration
  *  @param[in]  adcBufCfg      Pointer to ADCBuf configuration
  *  @param[in]  rfFreqScaleFactor RF frequency scale factor, see SOC_getDeviceRFFreqScaleFactor API
- *  @param[in]  bpmEnable      Flag indicates if BPM is enabled
+ *  @param[in]  bpmEnable      BPM flag, 0 -disabled, 1-enabled
  *
  *  \ingroup MMWDEMO_RFPARSER_EXTERNAL_FUNCTION
  *
@@ -835,6 +1087,7 @@ int32_t MmwDemo_RFParser_parseConfig
         /* Parse the profile and chirp configs and get the valid number of TX Antennas */
         retVal = MmwDemo_RFParser_parseCtrlConfig(outParams, subFrameIdx,
                                                   openCfg, ctrlCfg, rfFreqScaleFactor, bpmEnable);
+
         if (retVal != 0)
         {
             goto exit;

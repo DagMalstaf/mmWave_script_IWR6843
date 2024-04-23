@@ -132,6 +132,17 @@ extern "C" {
 #define MMWDEMO_RFPARSER_ENOTSUPPORT__NONCOMPLEX_ADC_FORMAT       (MMWAVE_ERRNO_MMWDEMO_RFPARSER_BASE-11)
 
 /**
+ * @brief   Error Code: Invalid input specified for num rx antennas.
+ */
+#define MMWDEMO_RFPARSER_EINVAL__NUM_RX_ANTENNAS                   (MMWAVE_ERRNO_MMWDEMO_RFPARSER_BASE-12)
+
+/**
+ * @brief   Error Code: Valid profileCfg not found for the given legacy frame or subframe
+ */
+#define MMWDEMO_RFPARSER_EINVAL__VALID_PROFILECFG_NOT_FOUND        (MMWAVE_ERRNO_MMWDEMO_RFPARSER_BASE-13)
+
+
+/**
 @}
 */
 
@@ -197,11 +208,29 @@ typedef struct MmwDemo_RFParserOutParams_t
                 than the minimum. */
     uint16_t    numDopplerBins;
 
-    /*! @brief  Range conversion factor for FFT range index to meters */
+    /*! @brief  Range conversion factor for FFT range index to meters 
+                (based on @ref numRangeBins) */
     float       rangeStep;
 
-    /*! @brief  Doppler conversion factor for Doppler FFT index to m/s */
+    /*! @brief  Doppler conversion factor for Doppler FFT index to m/s 
+                (based on @ref numDopplerBins) */
     float       dopplerStep;
+
+    /*! @brief  Range resolution in meters (based on @ref numAdcSamples) */
+    float       rangeResolution;
+
+    /*! @brief  Doppler resolution in m/s (based on @ref numDopplerChirps) */
+    float       dopplerResolution;
+
+    /*! @brief  Frame period in msec */
+    float       framePeriod;
+
+    /*! @brief  Chirp interval (chirp ramp time + chirp idle time) in msec */
+    float       chirpInterval;
+
+    /*! @brief  Center frequency of the chirp */
+    float       centerFreq;
+
 } MmwDemo_RFParserOutParams;
 
 
