@@ -48,8 +48,9 @@ ar1.CaptureCardConfig_Mode(1, 2, 1, 2, 3, 30)
 ar1.CaptureCardConfig_PacketDelay(25)
 ar1.GetCaptureCardFPGAVersion()
 
-ar1.CaptureCardConfig_StartRecord("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\adc_data_auto.bin", 1)
+ar1.CaptureCardConfig_StartRecord("C:\\CollectedData\\adc_data_auto_i.bin", 1)
+
 ar1.StartFrame()
 ar1.StopFrame()
 
-ar1.StartMatlabPostProc("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\adc_data_auto.bin")
+ar1.StartMatlabPostProc("C:\\CollectedData\\adc_data_auto_i.bin")
