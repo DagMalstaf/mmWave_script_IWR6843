@@ -13,7 +13,7 @@ NUM_TX = 2
 NUM_RX = 4
 
 -- ProfileConfig
-START_FREQ = 66 -- GHz
+START_FREQ = 60 -- GHz
 IDLE_TIME = 100 -- us
 RAMP_END_TIME = 60 -- us
 ADC_START_TIME = 6 --us
@@ -26,7 +26,7 @@ TX_START_TIME = 0
 -- FrameConfig
 START_CHIRP_TX = 0
 END_CHIRP_TX = 1 
-NUM_FRAMES = 8 -- Set this to 0 to continuously stream data
+NUM_FRAMES = 0 -- Set this to 0 to continuously stream data
 CHIRP_LOOPS = 128 
 PERIODICITY = 40 -- ms
 -----------------------------------------------------------
@@ -72,10 +72,10 @@ ar1.LVDSLaneConfig(0, 1, 1, 0, 0, 1, 0, 0)
 -----------------------------------------------------------
 
 -------- SENSOR CONFIG ------------------------------------
-ar1.ProfileConfig(0, START_FREQ, IDLE_TIME, ADC_START_TIME, RAMP_END_TIME, 0, 0, 0, 0, 0, 0, FREQ_SLOPE, TX_START_TIME, ADC_SAMPLES, SAMPLE_RATE, 0, 131072, 30)
+ar1.ProfileConfig(0, 60, 100, 6, 60, 0, 0, 0, 0, 0, 0, 29.982, 0, 256, 10000, 0, 131072, 30)
 ar1.ChirpConfig(0, 0, 0, 0, 0, 0, 0, 1, 0, 0)
 ar1.DisableTestSource(0)
-ar1.FrameConfig(START_CHIRP_TX, END_CHIRP_TX, NUM_FRAMES, CHIRP_LOOPS, PERIODICITY, 0, 0, 1)
+ar1.FrameConfig(0, 0, 0, 128, 40, 0, 0, 1)
 -----------------------------------------------------------
 
 -------- ETHERNET -----------------------------------------
@@ -91,8 +91,8 @@ ar1.GetCaptureCardFPGAVersion()
 ar1.CaptureCardConfig_StartRecord("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\auto_collection\\adc_data.bin", 0)
 
 ar1.StartFrame()
-os.execute("timeout /t 3 /nobreak")
-ar1.StopFrame()
-os.execute("timeout /t 3 /nobreak")
-ar1.StartMatlabPostProc("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\auto_collection\\adc_data.bin")
+os.execute("timeout /t 2 /nobreak")
+--ar1.StopFrame()
+--os.execute("timeout /t 3 /nobreak")
+--ar1.StartMatlabPostProc("C:\\ti\\mmwave_studio_02_01_01_00\\mmWaveStudio\\PostProc\\auto_collection\\adc_data.bin")
 -----------------------------------------------------------
