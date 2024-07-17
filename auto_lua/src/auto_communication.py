@@ -6,6 +6,15 @@ import numpy as np
 import mmwave.dsp as dsp
 import mmwave.clustering as clu
 import matplotlib.pyplot as plt
+from dashboard import RadarDashboard
+import threading
+import time
+from queue import Queue, Empty
+import numpy as np
+import matplotlib.pyplot as plt
+from plotting import *
+from mmwave.dsp.utils import Window
+
 
 numFrames = 0
 numADCSamples = 256
@@ -31,56 +40,11 @@ plot2DscatterXZ = False
 plot3Dscatter = False  
 plotCustomPlt = False
 
-import numpy as np
-import matplotlib.pyplot as plt
-from plotting import *
-from mmwave.dsp.utils import Window
-
-def detectObjectAboveSensor(radar_cube_dB, numRangeBins, range_resolution, dB_threshold=120, targetDistance=2):
-    rangeBinThreshold = int(targetDistance / range_resolution)
-    rangeBinThreshold = min(rangeBinThreshold, numRangeBins)
-
-    objectDetected = False
-    objectDistance = None
-    maxObjectThreshold = None
-    detectedBinIdx = None
-    detecteddBValue = None
-
-    # Loop through each chirp and range bin within the threshold
-    for chirpIdx in range(radar_cube_dB.shape[0]):
-        for binIdx in range(rangeBinThreshold):
-            if radar_cube_dB[chirpIdx, 0, binIdx] > dB_threshold:  # Assumes data is from channel 1 (chanIdx in MATLAB)
-                detectedBinIdx = binIdx
-                minObjectDistance = range_resolution * (detectedBinIdx)
-                maxObjectDistance = range_resolution * (detectedBinIdx + 1)
-                maxObjectThreshold = range_resolution * rangeBinThreshold
-                objectDetected = True
-                detecteddBValue = radar_cube_dB[chirpIdx, 0, detectedBinIdx]
-                break
-        if objectDetected:
-            break
-
-    if objectDetected:
-        print('---------------------------------------------------')
-        print('Object detected.')
-        #print('---------------------------------------------------')
-        #print(f'Cut Off Output: {dB_threshold} dB.')
-        #print(f'Cut Off Range: {maxObjectThreshold} meter.')
-        #print('---------------------------------------------------')
-        print(f'Detected Output: {detecteddBValue} dB.')
-        print(f'Detected Range between: {minObjectDistance} and {maxObjectDistance} meter.')
-        #print('---------------------------------------------------')
-        #print(f'Total bins: {rangeBinThreshold}')
-        #print(f'Detected bin: {detectedBinIdx}')
-        print('---------------------------------------------------')
-    else:
-        #print('---------------------------------------------------')
-        print('No object detected.')
-        #print('---------------------------------------------------')
 
 
 def process_data(radar_plot, frame, numRangeBins, range_resolution):
     # Range
+    print(frame)
     radar_cube = dsp.range_processing(frame, window_type_1d=Window.BLACKMAN)
     assert radar_cube.shape == (
     numChirpsPerFrame, numRxAntennas, numADCSamples), "[ERROR] Radar cube is not the correct shape!"
@@ -196,42 +160,74 @@ def process_data(radar_plot, frame, numRangeBins, range_resolution):
             axes[0].grid(b=True)
 
 
-#radar_plot.update_plot(radar_cube_dB, chirp_index=1, antenna_index=1)
-
 def main():
     cmd_path = r'C:\ti\mmwave_studio_02_01_01_00\mmWaveStudio\RunTime\RunCustomScripts.cmd'
     studio_runtime_path = r'C:\ti\mmwave_studio_02_01_01_00\mmWaveStudio\RunTime'
 
     subprocess.Popen(cmd_path, cwd=studio_runtime_path)
-    
+    print("Starting mmWave Studio...")
     time.sleep(110)
+    print("mmWave Studio should be ready now.")
 
     dca = DCA1000()
-    #radar_plot = RadarPlot(numRangeBins=numADCSamples)  
+    print("DCA1000 initialized.")
 
-    while True:
+    data_queue = Queue()
+
+    dashboard = RadarDashboard()
+    dashboard_thread = threading.Thread(target=dashboard.run, daemon=True)
+    dashboard_thread.start()
+    print("Dashboard thread started.")
+    dashboard.update_status("Dashboard initialised.")
+
+    def update_dashboard():
+        while True:
+            try:
+                data = data_queue.get(timeout=1)
+                if data is None:
+                    break 
+                frame, status = data
+                dashboard.update_status(status)
+                #print(frame)
+                if frame is not None:
+
+                    dashboard.update_plot("plot-0", frame[0][0].real, "scatter")
+                    
+                    # Example of adding a processed data plot
+                    # processed_data = process_frame(frame)
+                    # dashboard.update_plot("plot-1", processed_data, "scatter")
+            except Empty:
+                continue 
+
+    update_thread = threading.Thread(target=update_dashboard, daemon=True)
+    update_thread.start()
+    print("Dashboard update thread started.")
+
+
+    try:
+        time.sleep(10)
         raw_frame = dca.read()
-        #print(raw_frame.shape) # should be of size (262144,) but is of size (393216,)
         frame = dca.organize(raw_frame, num_chirps=numChirpsPerFrame, num_rx=numRxAntennas, num_samples=numADCSamples)
-        process_data(None, frame, numRangeBins, range_resolution)
+        print(frame)
+        print(frame[0])
+        print(frame[0][0])
         
+        while True:
+            raw_frame = dca.read()
+            frame = dca.organize(raw_frame, num_chirps=numChirpsPerFrame, num_rx=numRxAntennas, num_samples=numADCSamples)
+            data_queue.put((frame, "Reading raw data..."))
+
+    except KeyboardInterrupt:
+        print("Stopping the program...")
+        return
+
+    finally:
+        data_queue.put((None, None))
+        update_thread.join()
+        dashboard_thread.join()
+        print("Program stopped.")
 
 if __name__ == "__main__":
-    if plot2DscatterXY or plot2DscatterXZ:
-        fig, axes = plt.subplots(1, 2)
-    elif plot3Dscatter:
-        fig = plt.figure()
-    elif plotRangeDopp:
-        fig = plt.figure()
-    elif plotCustomPlt:
-        print("Using Custom Plotting")
-
     main()
 
-
-
-
-
-
-
-
+#process_data(None, frame, numRangeBins, range_resolution)
