@@ -14,7 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from plotting import *
 from mmwave.dsp.utils import Window
-
+import os
 
 numFrames = 0
 numADCSamples = 256
@@ -34,131 +34,38 @@ targetDistance = 5
 rangeBinThreshold = int(targetDistance / range_resolution)
 rangeBinThreshold = min(rangeBinThreshold, numRangeBins)
 
-plotRangeDopp = True  
-plot2DscatterXY = True  
-plot2DscatterXZ = False  
-plot3Dscatter = False  
-plotCustomPlt = False
 
 
+def write_to_file(filename, data):
+    with open(filename, 'a') as f:
+        f.write(data + '\n')
 
-def process_data(radar_plot, frame, numRangeBins, range_resolution):
-    # Range
-    print(frame)
-    radar_cube = dsp.range_processing(frame, window_type_1d=Window.BLACKMAN)
-    assert radar_cube.shape == (
-    numChirpsPerFrame, numRxAntennas, numADCSamples), "[ERROR] Radar cube is not the correct shape!"
+def detect_hand(processed_frame, range_axis, min_range=0.35, max_range=1, threshold_db=125):
+    valid_range_indices = np.where((range_axis >= min_range) & (range_axis <= max_range))[0]
+    
+    hand_detected = np.any(processed_frame[valid_range_indices] > threshold_db)
+    
+    if hand_detected:
+        max_value_index = np.argmax(processed_frame[valid_range_indices])
+        detected_distance = range_axis[valid_range_indices[max_value_index]]
+    else:
+        detected_distance = None
+    
+    return hand_detected, detected_distance
 
-    # Doppler 
-    det_matrix, aoa_input = dsp.doppler_processing(radar_cube, num_tx_antennas=numTxAntennas, clutter_removal_enabled=True)
+def process_frame(frame):
+    magnitudes = np.abs(frame[0][0])
+    magnitudes_db = 20 * np.log10(magnitudes)
+    return magnitudes_db
 
-    # Object Detection
-    fft2d_sum = det_matrix.astype(np.int64)
-    thresholdDoppler, noiseFloorDoppler = np.apply_along_axis(func1d=dsp.ca_,
-                                                                axis=0,
-                                                                arr=fft2d_sum.T,
-                                                                l_bound=1.5,
-                                                                guard_len=4,
-                                                                noise_len=16)
-
-    thresholdRange, noiseFloorRange = np.apply_along_axis(func1d=dsp.ca_,
-                                                            axis=0,
-                                                            arr=fft2d_sum,
-                                                            l_bound=2.5,
-                                                            guard_len=4,
-                                                            noise_len=16)
-
-    thresholdDoppler, noiseFloorDoppler = thresholdDoppler.T, noiseFloorDoppler.T
-    det_doppler_mask = (det_matrix > thresholdDoppler)
-    det_range_mask = (det_matrix > thresholdRange)
-
-    # Indices of peaks
-    full_mask = (det_doppler_mask & det_range_mask)
-    det_peaks_indices = np.argwhere(full_mask == True)
-
-    # peakVals and SNR 
-    peakVals = fft2d_sum[det_peaks_indices[:, 0], det_peaks_indices[:, 1]]
-    snr = peakVals - noiseFloorRange[det_peaks_indices[:, 0], det_peaks_indices[:, 1]]
-
-    dtype_location = '(' + str(numTxAntennas) + ',)<f4'
-    dtype_detObj2D = np.dtype({'names': ['rangeIdx', 'dopplerIdx', 'peakVal', 'location', 'SNR'],
-                                'formats': ['<i4', '<i4', '<f4', dtype_location, '<f4']})
-    detObj2DRaw = np.zeros((det_peaks_indices.shape[0],), dtype=dtype_detObj2D)
-    detObj2DRaw['rangeIdx'] = det_peaks_indices[:, 0].squeeze()
-    detObj2DRaw['dopplerIdx'] = det_peaks_indices[:, 1].squeeze()
-    detObj2DRaw['peakVal'] = peakVals.flatten()
-    detObj2DRaw['SNR'] = snr.flatten()
-
-    detObj2DRaw = dsp.prune_to_peaks(detObj2DRaw, det_matrix, numDopplerBins, reserve_neighbor=True)
-
-    detObj2D = dsp.peak_grouping_along_doppler(detObj2DRaw, det_matrix, numDopplerBins)
-    SNRThresholds2 = np.array([[2, 23], [10, 11.5], [35, 16.0]])
-    peakValThresholds2 = np.array([[4, 275], [1, 400], [500, 0]])
-    detObj2D = dsp.range_based_pruning(detObj2D, SNRThresholds2, peakValThresholds2, numRangeBins, 0.5, range_resolution)
-
-    print(detObj2D.shape)
-    azimuthInput = aoa_input[detObj2D['rangeIdx'], :, detObj2D['dopplerIdx']]
-
-    x, y, z = dsp.naive_xyz(azimuthInput.T, num_tx=numTxAntennas, num_rx=numRxAntennas)
-    xyzVecN = np.zeros((3, x.shape[0]))
-    xyzVecN[0] = x * range_resolution * detObj2D['rangeIdx']
-    xyzVecN[1] = y * range_resolution * detObj2D['rangeIdx']
-    xyzVecN[2] = z * range_resolution * detObj2D['rangeIdx']
-
-    Psi, Theta, Ranges, xyzVec = dsp.beamforming_naive_mixed_xyz(azimuthInput, detObj2D['rangeIdx'],
-                                                                    range_resolution, method='Capon', num_vrx=12)
-
-    # 3D-Clustering
-    numDetObjs = detObj2D.shape[0]
-    print(numDetObjs)
-    dtf = np.dtype({'names': ['rangeIdx', 'dopplerIdx', 'peakVal', 'location', 'SNR'],
-                    'formats': ['<f4', '<f4', '<f4', dtype_location, '<f4']})
-    detObj2D_f = detObj2D.astype(dtf)
-    detObj2D_f = detObj2D_f.view(np.float32).reshape(-1, 7)
-
-    for i, currRange in enumerate(Ranges):
-        if i >= (detObj2D_f.shape[0]):
-            detObj2D_f = np.insert(detObj2D_f, i, detObj2D_f[i - 1], axis=0)
-        if currRange == detObj2D_f[i][0]:
-            detObj2D_f[i][3] = xyzVec[0][i]
-            detObj2D_f[i][4] = xyzVec[1][i]
-            detObj2D_f[i][5] = xyzVec[2][i]
-        else:  
-            detObj2D_f = np.insert(detObj2D_f, i, detObj2D_f[i - 1], axis=0)
-            detObj2D_f[i][3] = xyzVec[0][i]
-            detObj2D_f[i][4] = xyzVec[1][i]
-            detObj2D_f[i][5] = xyzVec[2][i]
-
-    cluster = clu.radar_dbscan(detObj2D_f, 0, doppler_resolution, use_elevation=True)
-
-    cluster_np = np.array(cluster['size']).flatten()
-    if cluster_np.size != 0:
-        if max(cluster_np) > max_size:
-            max_size = max(cluster_np)
-
-    if plot2DscatterXY or plot2DscatterXZ:
-
-        if plot2DscatterXY:
-            xyzVec = xyzVec[:, (np.abs(xyzVec[2]) < 1.5)]
-            xyzVecN = xyzVecN[:, (np.abs(xyzVecN[2]) < 1.5)]
-            axes[0].set_ylim(bottom=0, top=10)
-            axes[0].set_ylabel('Range')
-            axes[0].set_xlim(left=-4, right=4)
-            axes[0].set_xlabel('Azimuth')
-            axes[0].grid(b=True)
-
-            axes[1].set_ylim(bottom=0, top=10)
-            axes[1].set_xlim(left=-4, right=4)
-            axes[1].set_xlabel('Azimuth')
-            axes[1].grid(b=True)
-
-        elif plot2DscatterXZ:
-            axes[0].set_ylim(bottom=-5, top=5)
-            axes[0].set_ylabel('Elevation')
-            axes[0].set_xlim(left=-4, right=4)
-            axes[0].set_xlabel('Azimuth')
-            axes[0].grid(b=True)
-
+def process_range_fft(frame):
+    range_resolution = 0.1954
+    num_range_bins = numADCSamples 
+    max_range = range_resolution * num_range_bins
+    radar_cube = dsp.range_processing(frame, window_type_1d=Window.HANNING)
+    magnitude_db = 20 * np.log10(np.abs(radar_cube[0][0]))
+    range_axis = np.linspace(0, max_range, num_range_bins)
+    return range_axis, magnitude_db, radar_cube
 
 def main():
     cmd_path = r'C:\ti\mmwave_studio_02_01_01_00\mmWaveStudio\RunTime\RunCustomScripts.cmd'
@@ -187,31 +94,44 @@ def main():
                 if data is None:
                     break 
                 frame, status = data
-                dashboard.update_status(status)
-                #print(frame)
+                if status is not None:
+                    dashboard.update_status(status)
                 if frame is not None:
-
-                    dashboard.update_plot("plot-0", frame[0][0].real, "scatter")
+                    dashboard.update_plot("plot-0", frame[0][0].real, "scatter", "Raw ADC Data")
                     
-                    # Example of adding a processed data plot
-                    # processed_data = process_frame(frame)
-                    # dashboard.update_plot("plot-1", processed_data, "scatter")
+                    processed_frame = process_frame(frame)
+                    dashboard.update_plot("plot-1", processed_frame, "scatter", "Processed Frame Data")
+
+                    range_axis, processed_frame_range_fft, radar_cube = process_range_fft(frame)
+                    dashboard.update_plot("plot-2", (range_axis, processed_frame_range_fft), "scatter", "Range FFT Frame Data")
+
+                    hand_detected, detected_distance = detect_hand(processed_frame_range_fft, range_axis, min_range=0.35, max_range=1)
+                    if hand_detected:
+                        hand_status = f"Yes (Distance: {detected_distance:.2f}m)"
+                    else:
+                        hand_status = "No"
+                    dashboard.update_status(f"Hand above sensor: {hand_status}")
+
             except Empty:
-                continue 
+                continue
 
     update_thread = threading.Thread(target=update_dashboard, daemon=True)
     update_thread.start()
     print("Dashboard update thread started.")
 
-
     try:
-        time.sleep(10)
+        output_file = 'radar_output.txt'
+        open(output_file, 'w').close()
+
         raw_frame = dca.read()
         frame = dca.organize(raw_frame, num_chirps=numChirpsPerFrame, num_rx=numRxAntennas, num_samples=numADCSamples)
-        print(frame)
-        print(frame[0])
-        print(frame[0][0])
-        
+        write_to_file(output_file, f"Size frame: {frame.shape}")
+
+    
+        write_to_file(output_file, f"Full frame: {frame}")
+        write_to_file(output_file, f"First chirp: {frame[0]}")
+        write_to_file(output_file, f"First sample of first chirp: {frame[0][0]}")
+
         while True:
             raw_frame = dca.read()
             frame = dca.organize(raw_frame, num_chirps=numChirpsPerFrame, num_rx=numRxAntennas, num_samples=numADCSamples)
@@ -220,6 +140,8 @@ def main():
     except KeyboardInterrupt:
         print("Stopping the program...")
         return
+    except Exception as e:
+        write_to_file(output_file, f"An error occurred: {str(e)}")
 
     finally:
         data_queue.put((None, None))
@@ -229,5 +151,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-#process_data(None, frame, numRangeBins, range_resolution)

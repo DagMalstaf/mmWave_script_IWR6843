@@ -18,9 +18,9 @@ IDLE_TIME = 100 -- us
 RAMP_END_TIME = 60 -- us
 ADC_START_TIME = 6 --us
 FREQ_SLOPE = 29,982 -- MHz/us
-ADC_SAMPLES = 256
+ADC_SAMPLES = 256 -- ADC Samples originally 256
 SAMPLE_RATE = 10000 -- ksps
-RX_GAIN = 30 -- dB
+RX_GAIN = 30 -- dB was orginially 30
 TX_START_TIME = 0
 
 -- FrameConfig
