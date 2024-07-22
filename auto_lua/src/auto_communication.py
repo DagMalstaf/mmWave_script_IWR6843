@@ -18,10 +18,11 @@ import os
 
 numFrames = 0
 numADCSamples = 256
-numTxAntennas = 3
+numTxAntennas = 2
 numRxAntennas = 4
 numLoopsPerFrame = 128
-numChirpsPerFrame = numTxAntennas * numLoopsPerFrame
+numChirpsPerFrame = numTxAntennas * numLoopsPerFrame #256
+#numChirpsPerFrame = 128
 numRangeBins = numADCSamples
 numDopplerBins = numLoopsPerFrame
 numAngleBins = 64
@@ -33,7 +34,6 @@ dB_threshold = 80
 targetDistance = 5
 rangeBinThreshold = int(targetDistance / range_resolution)
 rangeBinThreshold = min(rangeBinThreshold, numRangeBins)
-
 
 
 def write_to_file(filename, data):
@@ -97,7 +97,9 @@ def main():
                 if status is not None:
                     dashboard.update_status(status)
                 if frame is not None:
-                    dashboard.update_plot("plot-0", frame[0][0].real, "scatter", "Raw ADC Data")
+                    real_data = frame[0][0].real
+                    imag_data = frame[0][0].imag
+                    dashboard.update_plot("plot-0", (real_data, imag_data), "scatter", "Raw ADC Data (I/Q)")
                     
                     processed_frame = process_frame(frame)
                     dashboard.update_plot("plot-1", processed_frame, "scatter", "Processed Frame Data")
@@ -124,13 +126,18 @@ def main():
         open(output_file, 'w').close()
 
         raw_frame = dca.read()
+        write_to_file(output_file, f"Size frame RAW: {raw_frame.shape}")
+        write_to_file(output_file, f"Type frame RAW: {raw_frame.dtype}")
+        write_to_file(output_file, f"First sample of first chirp RAW: {raw_frame}")
+        write_to_file(output_file, f"First sample of first chirp RAW: {raw_frame[0]}")
+
+
         frame = dca.organize(raw_frame, num_chirps=numChirpsPerFrame, num_rx=numRxAntennas, num_samples=numADCSamples)
         write_to_file(output_file, f"Size frame: {frame.shape}")
-
-    
+        write_to_file(output_file, f"Type frame RAW: {frame.dtype}")
+        write_to_file(output_file, f"First sample of first chirp: {frame[0][0]}")
         write_to_file(output_file, f"Full frame: {frame}")
         write_to_file(output_file, f"First chirp: {frame[0]}")
-        write_to_file(output_file, f"First sample of first chirp: {frame[0][0]}")
 
         while True:
             raw_frame = dca.read()

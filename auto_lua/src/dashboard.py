@@ -7,6 +7,7 @@ import numpy as np
 import time
 import webbrowser
 import threading
+import subprocess
 
 class RadarDashboard:
     def __init__(self, port=8050):
@@ -29,9 +30,13 @@ class RadarDashboard:
 
     def setup_layout(self):
         self.app.layout = html.Div([
-            html.H1("Radar Dashboard"),
+            html.Div([
+                html.H1("Radar Dashboard", style={'display': 'inline-block', 'margin-right': '20px'}),
+                html.Button("Collect Data", id="collect-data-button", n_clicks=0,
+                            style={'float': 'right', 'margin-top': '20px'})
+            ]),
             html.Div(id="status", children=f"Status: {self.status}"),
-            html.Div(id="plots-container-0", children=[self.create_plot("plot-0", "Raw ADC Data", "ADC Samples", "ADC Real Value")]),
+            html.Div(id="plots-container-0", children=[self.create_plot("plot-0", "Raw ADC Data", "ADC Samples", "ADC I/Q Data")]),
             html.Div(id="plots-container-1", children=[self.create_plot("plot-1", "Processed ADC Data", "ADC Samples", "Magnitude (Db)")]),
             html.Div(id="hand-status", children=f"Hand above sensor: {self.hand_status}"),
             html.Div(id="hand-distance", children=""),
@@ -57,6 +62,15 @@ class RadarDashboard:
             hand_count_text = f"Hand detection count: {self.hand_detection_count}"
             return f"Status: {self.status}", hand_status_text, hand_distance_text, hand_count_text
 
+        @self.app.callback(
+            Output("status", "children"),
+            Input("collect-data-button", "n_clicks"),
+            prevent_initial_call=True
+        )
+        def collect_data(n_clicks):
+            if n_clicks > 0:
+                return self.execute_data_collection()
+            return dash.no_update
         
         @self.app.callback(
             Output('plot-data-store', 'data'),
@@ -69,19 +83,32 @@ class RadarDashboard:
             if current_plot_data is None:
                 current_plot_data = {}
             
-            for plot_id, ((x_data, y_data), plot_type) in self.plot_updates.items():
+            for plot_id, (data, plot_type) in self.plot_updates.items():
                 if plot_type == "scatter":
                     current_plot_data[plot_id] = {
-                        "data": [go.Scatter(x=x_data, y=y_data)],
+                        "data": [go.Scatter(x=data[0], y=data[1])],
                         "layout": go.Layout(
                             title=self.plots[plot_id]["title"],
                             xaxis=self.plots[plot_id]["xaxis"],
                             yaxis=self.plots[plot_id]["yaxis"]
                         )
                     }
+                elif plot_type == "iq_scatter":
+                    current_plot_data[plot_id] = {
+                        "data": [
+                            go.Scatter(x=data[0], y=data[1], name="Real (I)", line=dict(color="blue")),
+                            go.Scatter(x=data[0], y=data[2], name="Imaginary (Q)", line=dict(color="red"))
+                        ],
+                        "layout": go.Layout(
+                            title=self.plots[plot_id]["title"],
+                            xaxis=self.plots[plot_id]["xaxis"],
+                            yaxis=self.plots[plot_id]["yaxis"],
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                    }
                 elif plot_type == "heatmap":
                     current_plot_data[plot_id] = {
-                        "data": [go.Heatmap(z=y_data)],
+                        "data": [go.Heatmap(z=data[1], x=data[0])],
                         "layout": go.Layout(
                             title=self.plots[plot_id]["title"],
                             xaxis=self.plots[plot_id]["xaxis"],
@@ -130,7 +157,6 @@ class RadarDashboard:
                       figure=self.create_placeholder_figure(plot_id, title))
         ])
     
-
     def create_placeholder_figure(self, plot_id, title):
         return go.Figure(
             data=[go.Scatter(x=[], y=[])],
@@ -140,7 +166,6 @@ class RadarDashboard:
                 yaxis=self.plots[plot_id]["yaxis"]
             )
         )
-
 
     def update_plot(self, plot_id, data, plot_type="scatter", title=None, xaxis=None, yaxis=None):
         if plot_id not in self.plots:
@@ -152,13 +177,20 @@ class RadarDashboard:
             self.plots[plot_id]["xaxis"].update(xaxis)
         if yaxis:
             self.plots[plot_id]["yaxis"].update(yaxis)
+        
         if isinstance(data, tuple) and len(data) == 2:
-            x_data, y_data = data
+            if plot_id == "plot-0":
+                x_data = list(range(len(data[0])))
+                y_data_real = data[0]
+                y_data_imag = data[1]
+                self.plot_updates[plot_id] = ((x_data, y_data_real, y_data_imag), "iq_scatter")
+            else:
+                x_data, y_data = data
+                self.plot_updates[plot_id] = ((x_data, y_data), plot_type)
         else:
             x_data = list(range(len(data)))
             y_data = data
-        
-        self.plot_updates[plot_id] = ((x_data, y_data), plot_type)
+            self.plot_updates[plot_id] = ((x_data, y_data), plot_type)
 
     def update_status(self, new_status):
         if new_status is None:
@@ -177,7 +209,15 @@ class RadarDashboard:
                     self.hand_distance = None
         else:
             self.status = new_status
-    
+
+    def execute_data_collection(self):
+        try:
+            lua_script_path = r"C:\path\to\your\data_collection_script.lua"
+            subprocess.run(["lua", lua_script_path], check=True)
+            
+            return "Status: Data collection completed successfully."
+        except Exception as e:
+            return f"Status: Error during data collection: {str(e)}"
     
     def run(self):
         threading.Timer(1.25, lambda: webbrowser.open_new_tab(f'http://127.0.0.1:{self.port}')).start()
