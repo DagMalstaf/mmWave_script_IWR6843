@@ -53,11 +53,22 @@ class RadarSystem:
             except Empty:
                 continue
 
-    def process_and_update_plots(self, frame):
+    def process_and_update_plots(self, raw_frame):
+        
+        frame = self.dca.organize(raw_frame, 
+                                      num_chirps=128, 
+                                      num_rx=self.config['radar']['num_rx_antennas'], 
+                                      num_samples=self.config['radar']['num_adc_samples'])
+        
+        #frame = self.dca.generate_frame_data(raw_frame)
+        
+        self.write_to_file(f"Size frame: {frame.shape}")
+        self.write_to_file(f"Type frame RAW: {frame.dtype}")
+        
         real_data, imag_data = frame[0][0].real, frame[0][0].imag
         
         self.dashboard.update_plot("plot-0", (real_data, imag_data), "scatter", "Raw ADC Data (I/Q)")
-        
+    
         processed_frame = self.processor.process_frame(frame)
         self.dashboard.update_plot("plot-1", processed_frame, "scatter", "Processed Frame Data")
 
@@ -94,24 +105,9 @@ class RadarSystem:
             print("Program stopped.")
 
     def process_frames(self):
-        raw_frame = self.dca.read()
-        self.write_to_file(f"Size frame RAW: {raw_frame.shape}")
-        self.write_to_file(f"Type frame RAW: {raw_frame.dtype}")
-
-        frame = self.dca.organize(raw_frame, 
-                                  num_chirps=128, 
-                                  num_rx=self.config['radar']['num_rx_antennas'], 
-                                  num_samples=self.config['radar']['num_adc_samples'])
-        self.write_to_file(f"Size frame: {frame.shape}")
-        self.write_to_file(f"Type frame RAW: {frame.dtype}")
-    
         while True:
             raw_frame = self.dca.read()
-            frame = self.dca.organize(raw_frame, 
-                                      num_chirps=128, 
-                                      num_rx=self.config['radar']['num_rx_antennas'], 
-                                      num_samples=self.config['radar']['num_adc_samples'])
-            self.data_queue.put((frame, "Reading raw data..."))
+            self.data_queue.put((raw_frame, "Reading raw data..."))
 
 def main():
     config = load_config()

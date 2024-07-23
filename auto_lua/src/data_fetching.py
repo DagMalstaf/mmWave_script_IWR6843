@@ -165,6 +165,7 @@ class DCA1000:
         else:
             raise ValueError(f"{self.num_lanes} LVDS lanes are not supported")
 
+        #switch ReIm to ImRe
         if self.iq_swap == 1:
             frame_data[:, [0, 1]] = frame_data[:, [1, 0]]
 

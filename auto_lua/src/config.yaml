@@ -14,9 +14,9 @@ radar:
   ch_interleave: 1
 
 hand_detection:
-  min_range: 0.35
-  max_range: 1
-  threshold_db: 125
+  min_range: 0.10
+  max_range: 1.20
+  threshold_db: 80.5
 
 paths:
   cmd_path: 'C:\ti\mmwave_studio_02_01_01_00\mmWaveStudio\RunTime\RunCustomScripts.cmd'

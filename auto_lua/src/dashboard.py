@@ -15,6 +15,7 @@ class RadarDashboard:
         self.port = port
         self.plots = {
             "plot-0": {"title": "Raw ADC Data", "xaxis": {}, "yaxis": {}},
+            #"plot-x": {"title": "Raw ADC Data - var ", "xaxis": {}, "yaxis": {}},
             "plot-1": {"title": "Processed ADC Data", "xaxis": {}, "yaxis": {}},
             "plot-2": {"title": "Range Profile Plot", "xaxis": {}, "yaxis": {}}
         }
@@ -37,6 +38,7 @@ class RadarDashboard:
             ]),
             html.Div(id="status", children=f"Status: {self.status}"),
             html.Div(id="plots-container-0", children=[self.create_plot("plot-0", "Raw ADC Data", "ADC Samples", "ADC I/Q Data")]),
+            #html.Div(id="plots-container-x", children=[self.create_plot("plot-x", "Raw ADC Data - var ", "ADC Samples", "ADC I/Q Data")]),
             html.Div(id="plots-container-1", children=[self.create_plot("plot-1", "Processed ADC Data", "ADC Samples", "Magnitude (Db)")]),
             html.Div(id="hand-status", children=f"Hand above sensor: {self.hand_status}"),
             html.Div(id="hand-distance", children=""),
