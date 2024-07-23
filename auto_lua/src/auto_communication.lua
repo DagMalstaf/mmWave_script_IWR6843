@@ -60,7 +60,7 @@ ar1.GetBSSFwVersion()
 -----------------------------------------------------------
 
 -------- STATIC CONFIG ------------------------------------
-ar1.ChanNAdcConfig(1, 1, 1, 1, 1, 1, 1, 2, 1, 0)
+ar1.ChanNAdcConfig(1, 1, 0, 1, 1, 1, 1, 2, 1, 0)
 ar1.LPModConfig(0, 0)
 ar1.RfInit()
 -----------------------------------------------------------
@@ -79,6 +79,8 @@ ar1.FrameConfig(0, 0, 0, 128, 40, 0, 0, 1)
 -----------------------------------------------------------
 
 -------- ETHERNET -----------------------------------------
+ar1.CaptureCardConfig_ResetFPGA()
+ar1.selectRadarMode(0)
 ar1.GetCaptureCardDllVersion()
 ar1.SelectCaptureDevice("DCA1000")
 ar1.CaptureCardConfig_EthInit("192.168.33.30", "192.168.33.180", "12:34:56:78:90:12", 4096, 4098)

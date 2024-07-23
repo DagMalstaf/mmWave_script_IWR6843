@@ -63,7 +63,7 @@ class RadarDashboard:
             return f"Status: {self.status}", hand_status_text, hand_distance_text, hand_count_text
 
         @self.app.callback(
-            Output("status", "children"),
+            Output("status", "children", allow_duplicate=True),
             Input("collect-data-button", "n_clicks"),
             prevent_initial_call=True
         )
@@ -71,7 +71,7 @@ class RadarDashboard:
             if n_clicks > 0:
                 return self.execute_data_collection()
             return dash.no_update
-        
+                
         @self.app.callback(
             Output('plot-data-store', 'data'),
             Output('status-store', 'data'),
@@ -212,11 +212,14 @@ class RadarDashboard:
 
     def execute_data_collection(self):
         try:
-            lua_script_path = r"C:\path\to\your\data_collection_script.lua"
-            subprocess.run(["lua", lua_script_path], check=True)
+            cmd_path = r'C:\ti\mmwave_studio_02_01_01_00\mmWaveStudio\RunTime\triggerFrame.cmd'
+            studio_runtime_path = r'C:\ti\mmwave_studio_02_01_01_00\mmWaveStudio\RunTime'
+
+            subprocess.Popen(cmd_path, cwd=studio_runtime_path)
             
             return "Status: Data collection completed successfully."
         except Exception as e:
+            print(f"Status: Error during data collection: {str(e)}")
             return f"Status: Error during data collection: {str(e)}"
     
     def run(self):

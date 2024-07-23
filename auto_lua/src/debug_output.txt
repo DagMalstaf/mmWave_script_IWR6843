@@ -1,0 +1,14 @@
+Starting mmWave Studio...
+mmWave Studio should be ready now.
+DCA1000 initialized.
+Dashboard thread started.
+Dashboard update thread started.
+Before DCA READ
+AFTER DCA READ
+Frame RAW: [ -5439682 -29688207   8847390 ...         0         0         0]
+Size frame RAW: (524288,)
+Type frame RAW: int32
+Before DCA organize
+After DCA organize
+Size frame: (256, 4, 256)
+Type frame RAW: complex128
