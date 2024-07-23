@@ -60,12 +60,14 @@ class DCA1000:
         self.iq_swap = self.config['radar']['iq_swap']   
         self.ch_interleave = self.config['radar']['ch_interleave']
 
-        self.BYTES_IN_FRAME = (self.config['radar']['chirps'] * self.config['radar']['num_rx_antennas'] * self.config['radar']['num_tx_antennas'] * self.config['radar']['iq'] * self.config['radar']['num_adc_samples'] * self.config['radar']['bytes'])
-        self.BYTES_IN_FRAME_CLIPPED = (self.BYTES_IN_FRAME // self.config['dca1000']['BYTES_IN_PACKET']) * self.config['dca1000']['BYTES_IN_PACKET']
-        self.PACKETS_IN_FRAME = self.BYTES_IN_FRAME / self.config['dca1000']['BYTES_IN_PACKET']
-        self.PACKETS_IN_FRAME_CLIPPED = self.BYTES_IN_FRAME // self.config['dca1000']['BYTES_IN_PACKET']
-        self.UINT16_IN_PACKET = self.config['dca1000']['BYTES_IN_PACKET'] // 4
-        self.UINT16_IN_FRAME = self.BYTES_IN_FRAME // 2
+        self.BYTES_IN_FRAME = self.config['dca1000']['dataSizeOneFrame'] # 524288
+        self.BYTES_IN_FRAME_CLIPPED = (self.BYTES_IN_FRAME // self.config['dca1000']['BYTES_IN_PACKET']) * self.config['dca1000']['BYTES_IN_PACKET'] # 524160
+        
+        self.PACKETS_IN_FRAME = self.BYTES_IN_FRAME / self.config['dca1000']['BYTES_IN_PACKET'] #360.09
+        self.PACKETS_IN_FRAME_CLIPPED = self.BYTES_IN_FRAME // self.config['dca1000']['BYTES_IN_PACKET'] #360
+        
+        self.UINT16_IN_PACKET = self.config['dca1000']['BYTES_IN_PACKET'] // 2 #728 data points of 16 bits (I + Q) in one packet
+        self.UINT16_IN_FRAME = self.BYTES_IN_FRAME // 2 # 262144 data points of 16 bits in one frame
 
     def write_to_file(self, data):
         with open(self.config['paths']['output_file'], 'a') as f:
@@ -94,7 +96,7 @@ class DCA1000:
 
     def read(self, timeout=1):
         self.data_socket.settimeout(timeout)
-        ret_frame = np.zeros(self.UINT16_IN_FRAME, dtype=np.int32)
+        ret_frame = np.zeros(self.UINT16_IN_FRAME, dtype=np.float32)
         while True:
             packet_num, byte_count, packet_data = self._read_data_packet()
             if byte_count % self.BYTES_IN_FRAME_CLIPPED == 0:
@@ -118,6 +120,14 @@ class DCA1000:
 
             if packets_read > self.PACKETS_IN_FRAME_CLIPPED:
                 packets_read = 0
+    
+    def _read_data_packet(self):
+        data, _ = self.data_socket.recvfrom(self.config['dca1000']['MAX_PACKET_SIZE'])
+        packet_num = struct.unpack('<1l', data[:4])[0]
+        byte_count = struct.unpack('>Q', b'\x00\x00' + data[4:10][::-1])[0]
+        packet_data = np.frombuffer(data[10:], dtype=np.uint16).astype(np.float32)
+        packet_data = (packet_data.astype(np.int16)).astype(np.float32)
+        return packet_num, byte_count, packet_data
 
     def send_command(self, cmd, length='0000', body='', timeout=1):
         self.config_socket.settimeout(timeout)
@@ -131,12 +141,7 @@ class DCA1000:
             print(e)
         return resp
 
-    def _read_data_packet(self):
-        data, addr = self.data_socket.recvfrom(self.config['dca1000']['MAX_PACKET_SIZE'])
-        packet_num = struct.unpack('<1l', data[:4])[0]
-        byte_count = struct.unpack('>Q', b'\x00\x00' + data[4:10][::-1])[0]
-        packet_data = np.frombuffer(data[10:], dtype=np.int32)
-        return packet_num, byte_count, packet_data
+    
 
     def _listen_for_error(self):
         self.config_socket.settimeout(None)

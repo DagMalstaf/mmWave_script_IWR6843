@@ -3,12 +3,13 @@ mmWave Studio should be ready now.
 DCA1000 initialized.
 Dashboard thread started.
 Dashboard update thread started.
-Before DCA READ
-AFTER DCA READ
-Frame RAW: [ -5439682 -29688207   8847390 ...         0         0         0]
-Size frame RAW: (524288,)
-Type frame RAW: int32
-Before DCA organize
+Frame RAW: [ -47.  -34. -156. ...    0.    0.    0.]
+Frame RAW: -47.0
+Frame RAW: -34.0
+Frame RAW: -156.0
+Frame RAW: -164.0
+Size frame RAW: (262144,)
+Type frame RAW: float32
 After DCA organize
-Size frame: (256, 4, 256)
+Size frame: (128, 4, 256)
 Type frame RAW: complex128
